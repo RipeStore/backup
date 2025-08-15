@@ -2,157 +2,123 @@ import os
 import json
 import requests
 import subprocess
+import tempfile
 import shutil
 
 GITHUB_API_URL = "https://api.github.com"
+BACKUP_REPO = "RipeStore/backup"  # your repo
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+ZIP_PASSWORD = os.environ.get("BACKUP_ZIP_PASSWORD")
 
-# Auth headers
-headers = {
-    "Accept": "application/vnd.github+json",
-    "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}"
-}
+if not GITHUB_TOKEN:
+    raise RuntimeError("GITHUB_TOKEN environment variable not set")
+if not ZIP_PASSWORD:
+    raise RuntimeError("BACKUP_ZIP_PASSWORD environment variable not set")
 
-# Repo where backups are stored (this repo)
-backup_repo = "RipeStore/backup"
+headers = {"Authorization": f"token {GITHUB_TOKEN}"}
 
-# JSON file containing repos to monitor
-TARGETS_FILE = "repos.json"
 
-# Password for AES256 7z
-zip_password = os.getenv("BACKUP_ZIP_PASSWORD")
-if not zip_password:
-    raise ValueError("BACKUP_ZIP_PASSWORD environment variable not set.")
+def load_targets():
+    with open("targets.json", "r", encoding="utf-8") as f:
+        return json.load(f)
 
-# Paths
-artifacts_dir = "artifacts"
-os.makedirs(artifacts_dir, exist_ok=True)
+
+def get_latest_release(repo, allow_prerelease):
+    url = f"{GITHUB_API_URL}/repos/{repo}/releases"
+    r = requests.get(url, headers=headers)
+    if r.status_code != 200:
+        print(f"Failed to list releases for {repo}: {r.status_code} {r.text}")
+        return None
+    releases = r.json()
+    if not releases:
+        return None
+    for release in releases:
+        if release.get("prerelease") and not allow_prerelease:
+            continue
+        return release
+    return None
+
 
 def release_exists(backup_repo, tag):
-    """Check if a release with the given tag already exists in the backup repo."""
     url = f"{GITHUB_API_URL}/repos/{backup_repo}/releases/tags/{tag}"
     r = requests.get(url, headers=headers)
     return r.status_code == 200
 
-def download_asset(asset_url, dest_path):
-    r = requests.get(asset_url, headers=headers, stream=True)
-    r.raise_for_status()
-    with open(dest_path, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
 
-def seven_zip_with_password(archive_path, files):
-    # Best compression (-mx=9), AES256, hide filenames (-mhe=on)
+def download_assets(release, temp_dir):
+    assets = release.get("assets", [])
+    for asset in assets:
+        asset_url = asset["url"]
+        asset_name = asset["name"]
+        print(f"Downloading asset {asset_name}...")
+        r = requests.get(asset_url, headers={**headers, "Accept": "application/octet-stream"}, stream=True)
+        if r.status_code == 200:
+            file_path = os.path.join(temp_dir, asset_name)
+            with open(file_path, "wb") as f:
+                shutil.copyfileobj(r.raw, f)
+        else:
+            print(f"Failed to download {asset_name}: {r.status_code} {r.text}")
+
+
+def create_7z_archive(src_dir, archive_path, password):
     cmd = [
-        "7z", "a", "-t7z", "-mx=9", "-mhe=on",
-        f"-p{zip_password}", archive_path
-    ] + files
+        "7z", "a", "-t7z", archive_path, src_dir + os.sep,
+        f"-p{password}", "-mhe=on", "-mx=9"
+    ]
     subprocess.run(cmd, check=True)
 
-def main():
-    with open(TARGETS_FILE, "r") as f:
-        targets = json.load(f)
 
-    for target in targets:
-        owner = target["owner"]
-        repo = target["repo"]
-        include_prereleases = target.get("include_prereleases", False)
-
-        print(f"Checking latest release for {owner}/{repo} (allow prerelease={include_prereleases})...")
-        releases_url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases"
-        r = requests.get(releases_url, headers=headers)
-        if r.status_code != 200:
-            print(f"Failed to list releases for {owner}/{repo}: {r.status_code} {r.text}")
-            continue
-
-        releases = r.json()
-        if not releases:
-            print(f"No releases found for {owner}/{repo}.")
-            continue
-
-        # Pick latest release
-        release = None
-        for rel in releases:
-            if rel["prerelease"] and not include_prereleases:
-                continue
-            release = rel
-            break
-
-        if not release:
-            print(f"No suitable release found for {owner}/{repo}.")
-            continue
-
-        tag_name = release["tag_name"].lstrip("v")
-        backup_tag = f"{repo}-v{tag_name}"
-
-        # Skip if already backed up
-        if release_exists(backup_repo, backup_tag):
-            print(f"Release {backup_tag} already backed up — skipping.")
-            continue
-
-        print(f"Found new release {release['tag_name']} -> creating backup release {backup_tag}...")
-
-        # Download assets
-        downloaded_files = []
-        for asset in release.get("assets", []):
-            asset_name = asset["name"]
-            download_url = asset["url"]
-            print(f"Downloading asset {asset_name}...")
-            dest_file = os.path.join(artifacts_dir, asset_name)
-            r = requests.get(download_url, headers={
-                "Accept": "application/octet-stream",
-                "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}"
-            }, stream=True)
-            r.raise_for_status()
-            with open(dest_file, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            downloaded_files.append(dest_file)
-
-        # Save release notes inside archive (still password-protected)
-        notes_file = os.path.join(artifacts_dir, "release_notes.txt")
-        with open(notes_file, "w", encoding="utf-8") as f:
-            f.write(release.get("body", ""))
-        downloaded_files.append(notes_file)
-
-        # Create password-protected 7z
-        archive_path = os.path.join(artifacts_dir, f"{backup_tag}.7z")
-        seven_zip_with_password(archive_path, downloaded_files)
-
-        # Create release in backup repo
-        create_url = f"{GITHUB_API_URL}/repos/{backup_repo}/releases"
-        create_data = {
-            "tag_name": backup_tag,
-            "name": backup_tag,
-            "body": "",
-            "draft": False,
-            "prerelease": False
+def create_backup_release(backup_repo, tag_name, name, archive_path):
+    url = f"{GITHUB_API_URL}/repos/{backup_repo}/releases"
+    data = {"tag_name": tag_name, "name": name, "draft": False, "prerelease": False}
+    r = requests.post(url, headers=headers, json=data)
+    if r.status_code != 201:
+        print(f"Failed to create release {name} in {backup_repo}: {r.status_code} {r.text}")
+        return None
+    upload_url = r.json()["upload_url"].split("{")[0]
+    with open(archive_path, "rb") as f:
+        upload_headers = {
+            **headers,
+            "Content-Type": "application/x-7z-compressed"
         }
-        r = requests.post(create_url, headers=headers, json=create_data)
-        if r.status_code != 201:
-            print(f"Failed to create release {backup_tag} in {backup_repo}: {r.status_code} {r.text}")
+        upload_r = requests.post(f"{upload_url}?name={os.path.basename(archive_path)}",
+                                 headers=upload_headers, data=f)
+        if upload_r.status_code != 201:
+            print(f"Failed to upload asset: {upload_r.status_code} {upload_r.text}")
+            return False
+    return True
+
+
+def main():
+    targets = load_targets()
+    for target in targets:
+        repo = target["repo"]
+        allow_prerelease = target.get("allow_prerelease", False)
+
+        print(f"Checking latest release for {repo} (allow prerelease={allow_prerelease})...")
+        release = get_latest_release(repo, allow_prerelease)
+        if not release:
+            print(f"No release found for {repo}.")
             continue
 
-        release_id = r.json()["id"]
-        upload_url = r.json()["upload_url"].split("{")[0]
-
-        with open(archive_path, "rb") as f:
-            r2 = requests.post(
-                f"{upload_url}?name={os.path.basename(archive_path)}",
-                headers={
-                    "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}",
-                    "Content-Type": "application/x-7z-compressed"
-                },
-                data=f
-            )
-        if r2.status_code not in (200, 201):
-            print(f"Failed to upload asset: {r2.status_code} {r2.text}")
+        tag_name = f"{repo.replace('/', '_')}-v{release['tag_name']}"
+        if release_exists(BACKUP_REPO, tag_name):
+            print(f"Release {tag_name} already backed up — skipping.")
             continue
 
-        print(f"Backup for {backup_tag} completed.")
+        print(f"Found new release {release['tag_name']} -> creating backup release {tag_name}...")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            download_assets(release, tmpdir)
 
-        # Clean up artifacts
-        shutil.rmtree(artifacts_dir, ignore_errors=True)
-        os.makedirs(artifacts_dir, exist_ok=True)
+            archive_path = os.path.join(tmpdir, f"{tag_name}.7z")
+            create_7z_archive(tmpdir, archive_path, ZIP_PASSWORD)
+
+            success = create_backup_release(BACKUP_REPO, tag_name, tag_name, archive_path)
+            if success:
+                print(f"Backup for {tag_name} completed and uploaded.")
+            else:
+                print(f"Backup for {tag_name} failed.")
+
 
 if __name__ == "__main__":
     main()
