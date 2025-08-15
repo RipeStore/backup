@@ -1,5 +1,6 @@
 [
   { "owner": "kodjodevf", "repo": "mangayomi", "include_prereleases": true },
   { "owner": "RyanYuuki", "repo": "AnymeX", "include_prereleases": true },
-  { "owner": "pystardust", "repo": "ani-cli", "include_prereleases": true }
+  { "owner": "pystardust", "repo": "ani-cli", "include_prereleases": true },
+  { "owner": "5rahim", "repo": "seanime", "include_prereleases": true }  
 ]
