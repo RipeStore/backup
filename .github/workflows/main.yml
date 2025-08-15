@@ -32,4 +32,4 @@ jobs:
           # optional: override where to publish backups (owner/repo)
           BACKUP_REPO: ${{ github.repository }}
         run: |
-          python scripts/backup_releases.py
+          python ./backup_releases.py
