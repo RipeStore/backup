@@ -1,0 +1,35 @@
+name: Backup watched repos' releases
+
+on:
+  schedule:
+    # run periodically to detect new releases (adjust as you like)
+    - cron: '*/15 * * * *' # every 15 minutes
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies and tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+          sudo apt-get update -y
+          sudo apt-get install -y p7zip-full zip curl
+
+      - name: Run backup script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BACKUP_ZIP_PASSWORD: ${{ secrets.BACKUP_ZIP_PASSWORD }}
+          # optional: override where to publish backups (owner/repo)
+          BACKUP_REPO: ${{ github.repository }}
+        run: |
+          python scripts/backup_releases.py
