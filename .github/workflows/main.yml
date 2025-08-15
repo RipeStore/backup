@@ -3,13 +3,14 @@ name: Backup Releases
 on:
   schedule:
     - cron: "0 */6 * * *" # every 6 hours
-  workflow_dispatch: # allow manual trigger
+  workflow_dispatch: # allow manual run
+
+permissions:
+  contents: write
 
 jobs:
   backup:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # required to create releases in this repo
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -17,12 +18,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: '3.x'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install requests
 
       - name: Install 7-Zip
         run: sudo apt-get update && sudo apt-get install -y p7zip-full
