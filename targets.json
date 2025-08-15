@@ -1,12 +1,4 @@
 [
-  {
-    "owner": "kodjodevf",
-    "repo": "mangayomi",
-    "include_prereleases": true
-  },
-  {
-    "owner": "RyanYuuki",
-    "repo": "AnymeX",
-    "include_prereleases": true
-  }
+  { "owner": "kodjodevf", "repo": "mangayomi", "include_prereleases": true },
+  { "owner": "RyanYuuki", "repo": "AnymeX", "include_prereleases": true }
 ]
