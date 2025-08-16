@@ -5,5 +5,6 @@
   { "owner": "5rahim", "repo": "seanime", "include_prereleases": true },  
   { "owner": "aniyomiorg", "repo": "aniyomi", "include_prereleases": true },
   { "owner": "komikku-app", "repo": "anikku", "include_prereleases": true },
-  { "owner": "RockinChaos", "repo": "Shiru", "include_prereleases": true }
+  { "owner": "RockinChaos", "repo": "Shiru", "include_prereleases": true },
+  { "owner": "tachibana-shin", "repo": "hoyomi", "include_prereleases": true }
 ]
