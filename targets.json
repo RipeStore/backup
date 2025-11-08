@@ -7,5 +7,6 @@
   { "owner": "komikku-app", "repo": "anikku", "include_prereleases": true },
   { "owner": "RockinChaos", "repo": "Shiru", "include_prereleases": true },
   { "owner": "tachibana-shin", "repo": "hoyomi", "include_prereleases": true },
-  { "owner": "Darkx-dev", "repo": "ShonenX", "include_prereleases": true }
+  { "owner": "Darkx-dev", "repo": "ShonenX", "include_prereleases": true },
+  { "owner": "ARMSX2", "repo": "ARMSX2", "include_prereleases": true }
 ]
